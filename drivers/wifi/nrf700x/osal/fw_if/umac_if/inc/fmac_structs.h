@@ -5,8 +5,9 @@
  */
 
 /**
+ * @file fmac_structs.h
  * @brief Header containing declarations for utility functions etc for
- * FMAC IF Layer of the Wi-Fi driver.
+ *	  FMAC IF Layer of the Wi-Fi driver.
  */
 
 #ifndef __FMAC_STRUCTS_H__

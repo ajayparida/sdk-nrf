@@ -3,10 +3,9 @@
  *
  * SPDX-License-Identifier: LicenseRef-Nordic-5-Clause
  */
-
 /**
- * @brief File containing structure declarations for the
- * OSAL Layer of the Wi-Fi driver.
+ * @file osal_structs.h
+ * @brief Contains structure declaration for the OSAL Layer.
  */
 
 #ifndef __OSAL_STRUCTS_H__
@@ -14,35 +13,18 @@
 
 #include <stddef.h>
 
-/**
- * enum wifi_nrf_status - The status of an operation performed by the
- *                        RPU driver.
- * @WIFI_NRF_STATUS_SUCCESS: The operation was successful.
- * @WIFI_NRF_STATUS_FAIL: The operation failed.
- *
- * This enum lists the possible outcomes of an operation performed by the
- * RPU driver.
- */
+/**@brief The status of an operation performed by the RPU driver. */
 enum wifi_nrf_status {
-	WIFI_NRF_STATUS_SUCCESS,
-	WIFI_NRF_STATUS_FAIL = -1,
+	WIFI_NRF_STATUS_SUCCESS,	/**< Successful. */
+	WIFI_NRF_STATUS_FAIL = -1,	/**< Failed. */
 };
 
 
-/**
- * enum wifi_nrf_osal_dma_dir - DMA direction for a DMA operation
- * @WIFI_NRF_OSAL_DMA_DIR_TO_DEV: Data needs to be DMAed to the device.
- * @WIFI_NRF_DMA_DIR_FROM_DEV: Data needs to be DMAed from the device.
- * @WIFI_NRF_DMA_DIR_BIDI: Data can be DMAed in either direction i.e to
- *                        or from the device.
- *
- * This enum lists the possible directions for a DMA operation i.e whether the
- * DMA operation is for transferring data to or from a device
- */
+/**@brief DMA direction for a DMA operation. */
 enum wifi_nrf_osal_dma_dir {
-	WIFI_NRF_OSAL_DMA_DIR_TO_DEV,
-	WIFI_NRF_OSAL_DMA_DIR_FROM_DEV,
-	WIFI_NRF_OSAL_DMA_DIR_BIDI
+	WIFI_NRF_OSAL_DMA_DIR_TO_DEV,	/**< DMAed to the device. */
+	WIFI_NRF_OSAL_DMA_DIR_FROM_DEV, /**< DMAed from the device. */
+	WIFI_NRF_OSAL_DMA_DIR_BIDI	/**< DMAed in either direction */
 };
 
 

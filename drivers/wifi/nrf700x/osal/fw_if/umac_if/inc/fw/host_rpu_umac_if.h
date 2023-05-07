@@ -6,8 +6,9 @@
  */
 
 /**
- *
- *@brief <Control interface between host and RPU>
+ * @file host_rpu_umac_if.h
+ * 
+ * @brief <Control interface between host and RPU>
  */
 #ifndef __HOST_RPU_UMAC_IF_H
 #define __HOST_RPU_UMAC_IF_H
@@ -2353,20 +2354,19 @@ struct nrf_wifi_umac_cmd_chg_vif_attr {
 	struct nrf_wifi_umac_chg_vif_attr_info info;
 } __NRF_WIFI_PKD;
 
+/** @brief Interface name size */
 #define IFACENAMSIZ 16
 
 /**
- * struct nrf_wifi_umac_chg_vif_state_info- Interface state information.
- * @state: Interface state (1 = UP / 0 = DOWN).
- * @ifacename: Interface name.
+ * @brief Interface state information.
  *
- * This structure represents the information to be passed the RPU when changing
- * the state (up/down) of a virtual interface.
+ * @details This structure represents the information to be passed the RPU when changing
+ * 	    the state (up/down) of a virtual interface.
  */
 
 struct nrf_wifi_umac_chg_vif_state_info {
-	signed int state;
-	signed char ifacename[IFACENAMSIZ];
+	signed int state; /**< Interface state (1 = UP / 0 = DOWN). */
+	signed char ifacename[IFACENAMSIZ]; /**< Interface name */
 } __NRF_WIFI_PKD;
 
 /**

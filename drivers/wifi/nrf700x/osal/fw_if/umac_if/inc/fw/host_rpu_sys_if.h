@@ -6,8 +6,9 @@
  */
 
 /**
+ * @file host_rpu_sys_if.h
  *
- *@brief <System interface between host and RPU>
+ * @brief <System interface between host and RPU>
  */
 
 #ifndef __HOST_RPU_SYS_IF_H__
@@ -49,9 +50,11 @@
 
 #define MAX_TX_STREAMS 1
 #define MAX_RX_STREAMS 1
-
+/**@brief Maximum Number of VIFs supported */
 #define MAX_NUM_VIFS 2
+/**@brief Maximum Number of STAs supported */
 #define MAX_NUM_STAS 2
+/**@brief Maximum Number of APs supported */
 #define MAX_NUM_APS 1
 
 #define NRF_WIFI_COUNTRY_CODE_LEN 2
