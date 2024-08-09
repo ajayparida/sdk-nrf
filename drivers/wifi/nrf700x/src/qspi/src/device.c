@@ -53,7 +53,7 @@ struct qspi_config *qspi_defconfig(void)
 	config.test_hlread = false;
 	config.test_iteration = 0;
 
-	config.qspi_slave_latency = 0;
+	config.qspi_slave_latency = 1;
 
 	config.encryption = config.CMD_CNONCE = false;
 

@@ -611,11 +611,25 @@ enum nrf_wifi_status nrf_wifi_fmac_dev_add_zep(struct nrf_wifi_drv_priv_zep *drv
 	}
 
 	rpu_ctx_zep->rpu_ctx = rpu_ctx;
+	/** Block the loading of firmware as
+	 *  it has to be done from codescape.
+	 */
 
+#if 0
 	status = nrf_wifi_fw_load(rpu_ctx);
 	if (status != NRF_WIFI_STATUS_SUCCESS) {
 		LOG_ERR("%s: nrf_wifi_fw_load failed", __func__);
 		goto err;
+	}
+#endif
+
+	/** Check if frimware loaded properly */
+	status = nrf_wifi_fmac_fw_boot(rpu_ctx);
+	if (status != NRF_WIFI_STATUS_SUCCESS) {
+		LOG_ERR("%s: nrf_wifi_fw_boot failed", __func__);
+		goto err;
+	} else {
+		printf("Boot check passed\n");
 	}
 
 	status = nrf_wifi_fmac_ver_get(rpu_ctx,

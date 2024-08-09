@@ -715,7 +715,7 @@ config NET_MGMT_EVENT_QUEUE_SIZE
 endif
 
 config NRF_WIFI_COMBINED_BUCKEN_IOVDD_GPIO
-	bool
+	bool "Enable/Disable"
 	help
 	  Enable this option to use a single GPIO to control both buck enable and IOVDD enable,
 	  there will be a internal hardware switch to add delay between the two operations. This
@@ -749,3 +749,8 @@ config NRF_WIFI_QOS_NULL_BASED_RETRIEVAL
 	  depending on the delay. Ideal for heavy buffered traffic.
 
 endchoice
+config NRF_WIFI_SOC_VEGA
+	bool "Enable/Disable"
+	default n
+	help
+	  Enable this option to build for VEGA.
