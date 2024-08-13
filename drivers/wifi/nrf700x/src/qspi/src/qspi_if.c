@@ -1180,9 +1180,9 @@ void qspi_update_nonce(unsigned int addr, int len, int hlread)
 void qspi_addr_check(unsigned int addr, const void *data, unsigned int len)
 {
 	if ((addr % 4 != 0) || (((unsigned int)data) % 4 != 0) || (len % 4 != 0)) {
-		LOG_ERR("%s : Unaligned address %x %x %d %x %x", __func__, addr,
+/*		LOG_ERR("%s : Unaligned address %x %x %d %x %x", __func__, addr,
 		       (unsigned int)data, (addr % 4 != 0), (((unsigned int)data) % 4 != 0),
-		       (len % 4 != 0));
+		       (len % 4 != 0));*/
 	}
 }
 
@@ -1259,7 +1259,6 @@ int qspi_hl_readw(unsigned int addr, void *data)
 int qspi_hl_read(unsigned int addr, void *data, int len)
 {
 	int count = 0;
-
 	qspi_addr_check(addr, data, len);
 
 	while (count < (len / 4)) {

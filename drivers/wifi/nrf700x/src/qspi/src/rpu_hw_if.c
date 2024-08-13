@@ -35,22 +35,19 @@ GPIO_DT_SPEC_GET(NRF7002_NODE, iovdd_ctrl_gpios);
 static const struct gpio_dt_spec bucken_spec =
 GPIO_DT_SPEC_GET(NRF7002_NODE, bucken_gpios);
 
-char blk_name[][15] = { "SysBus",   "ExtSysBus",	   "PBus",	   "PKTRAM",
-			       "GRAM",	   "LMAC_ROM",	   "LMAC_RET_RAM", "LMAC_SRC_RAM",
-			       "UMAC_ROM", "UMAC_RET_RAM", "UMAC_SRC_RAM" };
-
+char blk_name[][15] = { "WIFIMCU_REG", "RAM0", "RAM1", "DATARAM", "CODERAM", "RAM2", "BELLBOARD", "SECURERAM"};
 uint32_t rpu_7002_memmap[][3] = {
-	{ 0x000000, 0x008FFF, 1 },
-	{ 0x009000, 0x03FFFF, 2 },
-	{ 0x040000, 0x07FFFF, 1 },
-	{ 0x0C0000, 0x0F0FFF, 0 },
-	{ 0x080000, 0x092000, 1 },
-	{ 0x100000, 0x134000, 1 },
-	{ 0x140000, 0x14C000, 1 },
-	{ 0x180000, 0x190000, 1 },
-	{ 0x200000, 0x261800, 1 },
-	{ 0x280000, 0x2A4000, 1 },
-	{ 0x300000, 0x338000, 1 }
+	{ 0x000000, 0x0FFFFF, 1 },
+	{ 0x100000, 0x17FFFF, 1 }, //RAM0 is LMAC Memory
+	{ 0x180000, 0x1FFFFF, 1 }, //RAM1 is UMAC Memory
+	{ 0x200000, 0x2FFFFF, 1 }, //PKTRAM is DATARAM
+	//CODERAM is ROM (LMAC & UMAC)
+	//FLASH  (rx)  : ORIGIN = 0x0E000000, LENGTH = 0x34000  for LMAC
+	//FLASH  (rx)  : ORIGIN = 0x0E034000, LENGTH = 0x79000  for UMAC
+	{ 0x300000, 0x37FFFF, 1 }, //CODERAM is ROM (LMAC & UMAC)
+	{ 0x3C0000, 0x3DFFFF, 1 }, //RAM2 is GRAM
+	{ 0x380000, 0x38FFFF, 1 }, //BELLBOARD
+	{ 0x3e0000, 0x3FFFFB, 1 },
 };
 
 static const struct qspi_dev *qdev;
@@ -66,7 +63,7 @@ static int validate_addr_blk(uint32_t start_addr,
 
 	if (((start_addr >= block_map[0]) && (start_addr <= block_map[1])) &&
 	    ((end_addr >= block_map[0]) && (end_addr <= block_map[1]))) {
-		if (block_no == PKTRAM) {
+		if (block_no == DATARAM) {
 			*hl_flag = 0;
 		}
 		*selected_blk = block_no;
@@ -98,7 +95,7 @@ static int rpu_validate_addr(uint32_t start_addr, uint32_t len, bool *hl_flag)
 		return -1;
 	}
 
-	if ((selected_blk == LMAC_ROM) || (selected_blk == UMAC_ROM)) {
+	if (selected_blk == CODERAM) {
 		LOG_ERR("Error: Cannot write to ROM blocks");
 		return -1;
 	}

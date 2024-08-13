@@ -17,17 +17,14 @@
 #include <zephyr/drivers/gpio.h>
 
 enum {
-	SYSBUS = 0,
-	EXT_SYS_BUS,
-	PBUS,
-	PKTRAM,
-	GRAM,
-	LMAC_ROM,
-	LMAC_RET_RAM,
-	LMAC_SRC_RAM,
-	UMAC_ROM,
-	UMAC_RET_RAM,
-	UMAC_SRC_RAM,
+	WIFIMCU_REG = 0,
+	RAM0,
+	RAM1,
+	DATARAM,
+	CODERAM,
+	RAM2,
+	BELLBOARD,
+	SECURERAM,
 	NUM_MEM_BLOCKS
 };
 
