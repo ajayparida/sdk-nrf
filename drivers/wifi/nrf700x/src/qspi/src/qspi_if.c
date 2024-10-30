@@ -99,7 +99,15 @@ BUILD_ASSERT(INST_0_SCK_FREQUENCY >= (NRF_QSPI_BASE_CLOCK_FREQ / 16),
  * starts. It was measured with a logic analyzer (unfortunately, the nRF5340
  * specification does not provide any numbers in this regard).
  */
-#define BASE_CLOCK_SWITCH_DELAY_US 7
+
+/* For FPGA kind of setup,  delay increased to 8 us instead of 7.
+ * With this change, didn't observe qspi sync issue. Otherwise during
+ * tcp/udp tx with higher rate we were observing below issue during qspi
+ * read of PKTRAM.
+ * (in hal_rpu_event_get() we are receiving rpu_msg_hdr->len as 8A8A8AA)
+ */
+
+#define BASE_CLOCK_SWITCH_DELAY_US 8
 
 #else
 /*
