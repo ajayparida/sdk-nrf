@@ -12,9 +12,11 @@
 #include <nrf71_wifi_ctrl.h>
 #include <zephyr/sys/sys_heap.h>
 #include "common/fmac_util.h"
+#include "common/fmac_cmd_common.h"
 #include "system/fmac_api.h"
 #include "fmac_main.h"
 #include "shim.h"
+#include "util.h"
 #include "wifi_util.h"
 
 
@@ -1297,6 +1299,494 @@ static int nrf_wifi_util_heap(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
+/* Parses a single "<key>=<value>" unsigned integer parameter from the
+ * supplied segment and stores it in *out when present. The look-up is bounded
+ * to the current peer's segment by the caller (the buffer is temporarily NUL
+ * terminated at the next peer boundary), so parameters of the following peer
+ * are never picked up by mistake.
+ */
+static void ftm_parse_uint(const char *seg, const char *key, unsigned long *out)
+{
+	const char *tok = strstr(seg, key);
+
+	if (tok) {
+		sscanf(tok + strlen(key), "%lu", out);
+	}
+}
+
+/* Parses a "<key>=<hexstring>" token (e.g. "protocol=6c0000") and converts the
+ * hex string into raw bytes stored in out[]. Returns the number of bytes
+ * written, 0 if the key is absent, or -1 on a malformed hex value.
+ */
+static int util_parse_hex(const char *buf,
+			  const char *key,
+			  unsigned char *out,
+			  unsigned int out_sz)
+{
+	const char *tok = strstr(buf, key);
+	char hex_str[64];
+
+	if (!tok) {
+		return 0;
+	}
+
+	if (sscanf(tok + strlen(key), "%63s", hex_str) != 1) {
+		return -1;
+	}
+
+	return nrf_wifi_utils_hex_str_to_val(out,
+					     out_sz,
+					     (unsigned char *)hex_str);
+}
+
+static int nrf_wifi_util_ftm_start(const struct shell *sh,
+				   size_t argc,
+				   char *argv[])
+{
+	enum nrf_wifi_status status = NRF_WIFI_STATUS_FAIL;
+	struct nrf_wifi_fmac_dev_ctx *fmac_dev_ctx = NULL;
+	struct nrf_wifi_umac_cmd_meas_start ftm_cmd;
+	char conf_buf[256];
+	char *seg = NULL;
+	char *tok_s = NULL;
+	unsigned long val = 0;
+	size_t off = 0;
+	unsigned int i = 0;
+	int ret = 0;
+
+	memset(&ftm_cmd, 0, sizeof(ftm_cmd));
+
+	/* The FTM parameters are passed as "<key>=<value>" tokens. Re-assemble
+	 * them into a single buffer so they can be parsed regardless of order.
+	 * Tip: pass the whole parameter list as one quoted argument to avoid the
+	 * shell's argument count limit (CONFIG_SHELL_ARGC_MAX).
+	 */
+	for (i = 1; i < argc; i++) {
+		int n = snprintf(conf_buf + off,
+				 sizeof(conf_buf) - off,
+				 "%s%s",
+				 (off ? " " : ""),
+				 argv[i]);
+
+		if ((n < 0) || ((size_t)n >= sizeof(conf_buf) - off)) {
+			shell_fprintf(sh,
+				      SHELL_ERROR,
+				      "FTM parameters too long\n");
+			return -ENOEXEC;
+		}
+		off += n;
+	}
+
+	tok_s = strstr(conf_buf, "num_of_peers=");
+	if (!tok_s) {
+		shell_fprintf(sh,
+			      SHELL_ERROR,
+			      "num_of_peers is mandatory\n");
+		shell_help(sh);
+		return -ENOEXEC;
+	}
+	sscanf(tok_s + strlen("num_of_peers="), "%lu", &val);
+	ftm_cmd.info.n_peers = val;
+
+	if ((ftm_cmd.info.n_peers == 0) ||
+	    (ftm_cmd.info.n_peers > MAX_NUM_PEERS)) {
+		shell_fprintf(sh,
+			      SHELL_ERROR,
+			      "Invalid num_of_peers %u (valid: 1 - %d)\n",
+			      ftm_cmd.info.n_peers,
+			      MAX_NUM_PEERS);
+		return -ENOEXEC;
+	}
+
+	seg = conf_buf;
+	for (i = 0; i < ftm_cmd.info.n_peers; i++) {
+		struct nrf_wifi_umac_meas_request *req = &ftm_cmd.info.meas_req[i];
+		unsigned int mac[NRF_WIFI_ETH_ADDR_LEN];
+		char *seg_end = NULL;
+		char saved = '\0';
+		unsigned int j = 0;
+
+		tok_s = strstr(seg, "mac_addr=");
+		if (!tok_s) {
+			shell_fprintf(sh,
+				      SHELL_ERROR,
+				      "mac_addr missing for peer %u\n",
+				      i);
+			return -ENOEXEC;
+		}
+
+		if (sscanf(tok_s + strlen("mac_addr="),
+			   "%x:%x:%x:%x:%x:%x",
+			   &mac[0], &mac[1], &mac[2],
+			   &mac[3], &mac[4], &mac[5]) != NRF_WIFI_ETH_ADDR_LEN) {
+			shell_fprintf(sh,
+				      SHELL_ERROR,
+				      "Invalid mac_addr for peer %u "
+				      "(expected xx:xx:xx:xx:xx:xx)\n",
+				      i);
+			return -ENOEXEC;
+		}
+
+		for (j = 0; j < NRF_WIFI_ETH_ADDR_LEN; j++) {
+			req->mac_addr[j] = (unsigned char)mac[j];
+		}
+
+		/* Bound the remaining look-ups to this peer's segment, which
+		 * ends where the next peer's "mac_addr=" begins.
+		 */
+		seg_end = strstr(tok_s + strlen("mac_addr="), "mac_addr=");
+		if (seg_end) {
+			saved = *seg_end;
+			*seg_end = '\0';
+		}
+
+		val = 0;
+		ftm_parse_uint(tok_s, "band=", &val);
+		req->band = (signed int)val;
+
+		val = 0;
+		ftm_parse_uint(tok_s, "center_freq=", &val);
+		req->center_frequency = (unsigned int)val;
+
+		val = 0;
+		ftm_parse_uint(tok_s, "preamble=", &val);
+		req->preamble = (signed int)val;
+
+		val = 0;
+		ftm_parse_uint(tok_s, "burst_period=", &val);
+		req->burst_period = (unsigned char)val;
+
+		val = 0;
+		ftm_parse_uint(tok_s, "ftms_per_burst=", &val);
+		req->ftms_per_burst = (unsigned char)val;
+
+		val = 0;
+		ftm_parse_uint(tok_s, "ftm_params=", &val);
+		req->ftm_params = (unsigned char)val;
+
+		val = 0;
+		ftm_parse_uint(tok_s, "burst_duration=", &val);
+		req->burst_duration = (unsigned char)val;
+
+		val = 0;
+		ftm_parse_uint(tok_s, "num_bursts_exp=", &val);
+		req->num_bursts_exp = (unsigned char)val;
+
+		val = 0;
+		ftm_parse_uint(tok_s, "min_delta_ftm=", &val);
+		req->min_delta_ftm = (unsigned char)val;
+
+		val = 0;
+		ftm_parse_uint(tok_s, "tsf_timer_value=", &val);
+		req->tsf_timer_value = (unsigned short)val;
+
+		val = 0;
+		ftm_parse_uint(tok_s, "tsf_timer_disable=", &val);
+		req->tsf_timer_disable = (unsigned char)val;
+
+		if (seg_end) {
+			*seg_end = saved;
+			seg = seg_end;
+		}
+	}
+
+	ftm_cmd.umac_hdr.cmd_evnt = NRF_WIFI_UMAC_CMD_MEAS_START;
+	ftm_cmd.umac_hdr.ids.wdev_id = 0;
+	ftm_cmd.umac_hdr.ids.valid_fields |= NRF_WIFI_INDEX_IDS_WDEV_ID_VALID;
+
+	k_mutex_lock(&ctx->rpu_lock, K_FOREVER);
+	if (!ctx->rpu_ctx) {
+		shell_fprintf(sh,
+			      SHELL_ERROR,
+			      "RPU context not initialized\n");
+		ret = -ENOEXEC;
+		goto unlock;
+	}
+	fmac_dev_ctx = ctx->rpu_ctx;
+
+	status = umac_cmd_cfg(fmac_dev_ctx,
+			      &ftm_cmd,
+			      sizeof(ftm_cmd));
+	if (status != NRF_WIFI_STATUS_SUCCESS) {
+		shell_fprintf(sh,
+			      SHELL_ERROR,
+			      "Failed to start FTM measurement\n");
+		ret = -ENOEXEC;
+		goto unlock;
+	}
+
+	shell_fprintf(sh,
+		      SHELL_INFO,
+		      "FTM measurement started for %u peer(s)\n",
+		      ftm_cmd.info.n_peers);
+	ret = 0;
+unlock:
+	k_mutex_unlock(&ctx->rpu_lock);
+	return ret;
+}
+
+static int nrf_wifi_util_neighbor_req(const struct shell *sh,
+				      size_t argc,
+				      char *argv[])
+{
+	enum nrf_wifi_status status = NRF_WIFI_STATUS_FAIL;
+	struct nrf_wifi_fmac_dev_ctx *fmac_dev_ctx = NULL;
+	struct nrf_wifi_cmd_neighbor_req_config neighbor_cmd;
+	char conf_buf[256];
+	unsigned long val = 0;
+	size_t off = 0;
+	unsigned int i = 0;
+	int ret = 0;
+
+	memset(&neighbor_cmd, 0, sizeof(neighbor_cmd));
+
+	/* Re-assemble the "<key>=<value>" tokens into a single buffer so they
+	 * can be parsed regardless of order. Pass the whole parameter list as
+	 * one quoted argument to avoid the shell's argument count limit
+	 * (CONFIG_SHELL_ARGC_MAX).
+	 */
+	for (i = 1; i < argc; i++) {
+		int n = snprintf(conf_buf + off,
+				 sizeof(conf_buf) - off,
+				 "%s%s",
+				 (off ? " " : ""),
+				 argv[i]);
+
+		if ((n < 0) || ((size_t)n >= sizeof(conf_buf) - off)) {
+			shell_fprintf(sh,
+				      SHELL_ERROR,
+				      "Neighbor request parameters too long\n");
+			return -ENOEXEC;
+		}
+		off += n;
+	}
+
+	val = 0;
+	ftm_parse_uint(conf_buf, "token=", &val);
+	neighbor_cmd.info.dialog_token = (unsigned char)val;
+
+	val = 0;
+	ftm_parse_uint(conf_buf, "sub_elems=", &val);
+	neighbor_cmd.info.sub_elems = (unsigned char)val;
+
+	val = 0;
+	ftm_parse_uint(conf_buf, "lci_mode=", &val);
+	neighbor_cmd.info.lci.req_mode = (unsigned char)val;
+
+	val = 0;
+	ftm_parse_uint(conf_buf, "lci_token=", &val);
+	neighbor_cmd.info.lci.req_token = (unsigned char)val;
+
+	val = 0;
+	ftm_parse_uint(conf_buf, "lci_sub=", &val);
+	neighbor_cmd.info.lci.req_sub = (unsigned char)val;
+
+	val = 0;
+	ftm_parse_uint(conf_buf, "civic_mode=", &val);
+	neighbor_cmd.info.civic.req_mode = (unsigned char)val;
+
+	val = 0;
+	ftm_parse_uint(conf_buf, "civic_token=", &val);
+	neighbor_cmd.info.civic.req_token = (unsigned char)val;
+
+	val = 0;
+	ftm_parse_uint(conf_buf, "civic_sub=", &val);
+	neighbor_cmd.info.civic.req_sub = (unsigned char)val;
+
+	val = 0;
+	ftm_parse_uint(conf_buf, "civic_loc_type=", &val);
+	neighbor_cmd.info.civic_loc_type = (unsigned char)val;
+
+	val = 0;
+	ftm_parse_uint(conf_buf, "civic_interval_units=", &val);
+	neighbor_cmd.info.civic_interval_units = (unsigned char)val;
+
+	val = 0;
+	ftm_parse_uint(conf_buf, "civic_interval=", &val);
+	neighbor_cmd.info.civic_interval = (unsigned short)val;
+
+	neighbor_cmd.umac_hdr.cmd_evnt = NRF_WIFI_UMAC_CMD_CONFIG_NEIGHBOR_REQ;
+	neighbor_cmd.umac_hdr.ids.wdev_id = 0;
+	neighbor_cmd.umac_hdr.ids.valid_fields |= NRF_WIFI_INDEX_IDS_WDEV_ID_VALID;
+
+	k_mutex_lock(&ctx->rpu_lock, K_FOREVER);
+	if (!ctx->rpu_ctx) {
+		shell_fprintf(sh,
+			      SHELL_ERROR,
+			      "RPU context not initialized\n");
+		ret = -ENOEXEC;
+		goto unlock;
+	}
+	fmac_dev_ctx = ctx->rpu_ctx;
+
+	status = umac_cmd_cfg(fmac_dev_ctx,
+			      &neighbor_cmd,
+			      sizeof(neighbor_cmd));
+	if (status != NRF_WIFI_STATUS_SUCCESS) {
+		shell_fprintf(sh,
+			      SHELL_ERROR,
+			      "Neighbor request command failed\n");
+		ret = -ENOEXEC;
+		goto unlock;
+	}
+
+	shell_fprintf(sh,
+		      SHELL_INFO,
+		      "Neighbor request sent (token=%u)\n",
+		      neighbor_cmd.info.dialog_token);
+	ret = 0;
+unlock:
+	k_mutex_unlock(&ctx->rpu_lock);
+	return ret;
+}
+
+#define GAS_QUERY_IDS_MAX_LEN 64
+
+static int nrf_wifi_util_gas_req(const struct shell *sh,
+				 size_t argc,
+				 char *argv[])
+{
+	enum nrf_wifi_status status = NRF_WIFI_STATUS_FAIL;
+	struct nrf_wifi_fmac_dev_ctx *fmac_dev_ctx = NULL;
+	unsigned char cmd_buf[sizeof(struct nrf_wifi_cmd_gas_anqp_config) +
+			      GAS_QUERY_IDS_MAX_LEN];
+	struct nrf_wifi_cmd_gas_anqp_config *gas_cmd =
+		(struct nrf_wifi_cmd_gas_anqp_config *)cmd_buf;
+	char conf_buf[256];
+	unsigned int mac[NRF_WIFI_ETH_ADDR_LEN];
+	unsigned long val = 0;
+	size_t off = 0;
+	unsigned int i = 0;
+	int query_len = 0;
+	int hex_ret = 0;
+	int ret = 0;
+
+	memset(cmd_buf, 0, sizeof(cmd_buf));
+
+	/* Re-assemble the "<key>=<value>" tokens into a single buffer so they
+	 * can be parsed regardless of order. Pass the whole parameter list as
+	 * one quoted argument to avoid the shell's argument count limit
+	 * (CONFIG_SHELL_ARGC_MAX).
+	 */
+	for (i = 1; i < argc; i++) {
+		int n = snprintf(conf_buf + off,
+				 sizeof(conf_buf) - off,
+				 "%s%s",
+				 (off ? " " : ""),
+				 argv[i]);
+
+		if ((n < 0) || ((size_t)n >= sizeof(conf_buf) - off)) {
+			shell_fprintf(sh,
+				      SHELL_ERROR,
+				      "GAS request parameters too long\n");
+			return -ENOEXEC;
+		}
+		off += n;
+	}
+
+	if (strstr(conf_buf, "mac_addr=")) {
+		if (sscanf(strstr(conf_buf, "mac_addr=") + strlen("mac_addr="),
+			   "%x:%x:%x:%x:%x:%x",
+			   &mac[0], &mac[1], &mac[2],
+			   &mac[3], &mac[4], &mac[5]) != NRF_WIFI_ETH_ADDR_LEN) {
+			shell_fprintf(sh,
+				      SHELL_ERROR,
+				      "Invalid mac_addr (expected xx:xx:xx:xx:xx:xx)\n");
+			return -ENOEXEC;
+		}
+		for (i = 0; i < NRF_WIFI_ETH_ADDR_LEN; i++) {
+			gas_cmd->info.bssid[i] = (unsigned char)mac[i];
+		}
+	}
+
+	val = 0;
+	ftm_parse_uint(conf_buf, "token=", &val);
+	gas_cmd->info.dialog_token = (unsigned char)val;
+
+	val = 0;
+	ftm_parse_uint(conf_buf, "channel=", &val);
+	gas_cmd->info.channel_num = (unsigned int)val;
+
+	val = 0;
+	ftm_parse_uint(conf_buf, "band=", &val);
+	gas_cmd->info.band = (signed int)val;
+
+	hex_ret = util_parse_hex(conf_buf,
+				 "protocol=",
+				 gas_cmd->info.protocol_ie,
+				 sizeof(gas_cmd->info.protocol_ie));
+	if (hex_ret < 0) {
+		shell_fprintf(sh,
+			      SHELL_ERROR,
+			      "Invalid protocol value (expected hex string)\n");
+		return -ENOEXEC;
+	}
+
+	val = 0;
+	ftm_parse_uint(conf_buf, "length=", &val);
+	gas_cmd->info.length = (unsigned char)val;
+
+	query_len = util_parse_hex(conf_buf,
+				   "query_ids=",
+				   gas_cmd->info.query_ids,
+				   GAS_QUERY_IDS_MAX_LEN);
+	if (query_len < 0) {
+		shell_fprintf(sh,
+			      SHELL_ERROR,
+			      "Invalid query_ids value (expected hex string)\n");
+		return -ENOEXEC;
+	}
+
+	/* If length was not supplied, derive it from the parsed query_ids. */
+	if (gas_cmd->info.length == 0) {
+		gas_cmd->info.length = (unsigned char)query_len;
+	}
+
+	if (gas_cmd->info.length > GAS_QUERY_IDS_MAX_LEN) {
+		shell_fprintf(sh,
+			      SHELL_ERROR,
+			      "query length %u exceeds maximum %d\n",
+			      gas_cmd->info.length,
+			      GAS_QUERY_IDS_MAX_LEN);
+		return -ENOEXEC;
+	}
+
+	gas_cmd->umac_hdr.cmd_evnt = NRF_WIFI_UMAC_CMD_GAS_ANQP_QUERY;
+	gas_cmd->umac_hdr.ids.wdev_id = 0;
+	gas_cmd->umac_hdr.ids.valid_fields |= NRF_WIFI_INDEX_IDS_WDEV_ID_VALID;
+
+	k_mutex_lock(&ctx->rpu_lock, K_FOREVER);
+	if (!ctx->rpu_ctx) {
+		shell_fprintf(sh,
+			      SHELL_ERROR,
+			      "RPU context not initialized\n");
+		ret = -ENOEXEC;
+		goto unlock;
+	}
+	fmac_dev_ctx = ctx->rpu_ctx;
+
+	status = umac_cmd_cfg(fmac_dev_ctx,
+			      gas_cmd,
+			      sizeof(*gas_cmd) + gas_cmd->info.length);
+	if (status != NRF_WIFI_STATUS_SUCCESS) {
+		shell_fprintf(sh,
+			      SHELL_ERROR,
+			      "GAS ANQP query command failed\n");
+		ret = -ENOEXEC;
+		goto unlock;
+	}
+
+	shell_fprintf(sh,
+		      SHELL_INFO,
+		      "GAS ANQP query sent (token=%u, length=%u)\n",
+		      gas_cmd->info.dialog_token,
+		      gas_cmd->info.length);
+	ret = 0;
+unlock:
+	k_mutex_unlock(&ctx->rpu_lock);
+	return ret;
+}
+
 SHELL_STATIC_SUBCMD_SET_CREATE(
 	nrf71_util,
 	SHELL_CMD_ARG(he_ltf,
@@ -1416,6 +1906,82 @@ SHELL_STATIC_SUBCMD_SET_CREATE(
 		      1,
 		      0),
 #endif /* CONFIG_NRF_WIFI_RPU_RECOVERY */
+	SHELL_CMD_ARG(ftm_start,
+		      NULL,
+		      "Start an FTM (Fine Timing Measurement) ranging session.\n"
+		      "Pass the parameters as a single quoted string of\n"
+		      "\"<key>=<value>\" tokens (quoting avoids the shell argument\n"
+		      "count limit).\n"
+		      "Parameters:\n"
+		      "    num_of_peers=<n>    : Number of peers (1 - 4) [mandatory]\n"
+		      "  Per-peer (repeat the block below for each peer):\n"
+		      "    mac_addr=<xx:xx:xx:xx:xx:xx> : Peer MAC address [mandatory]\n"
+		      "    band=<n>            : Band the channel belongs to\n"
+		      "    center_freq=<n>     : Center frequency in MHz\n"
+		      "    preamble=<n>        : Preamble type (see nrf_wifi_preamble)\n"
+		      "    burst_period=<n>    : Interval between FTM bursts\n"
+		      "    ftms_per_burst=<n>  : FTM frames per burst\n"
+		      "    ftm_params=<n>      : FTM parameter flags\n"
+		      "    burst_duration=<n>  : Single burst measurement time\n"
+		      "    num_bursts_exp=<n>  : Total number of bursts\n"
+		      "    min_delta_ftm=<n>   : Minimum delta FTM\n"
+		      "    tsf_timer_value=<n> : TSF timer value\n"
+		      "    tsf_timer_disable=<n>: Enable(0)/disable(1) TSF timer\n"
+		      "Example:\n"
+		      "    wifi_util ftm_start \"num_of_peers=1 "
+		      "mac_addr=00:11:22:33:44:55 band=0 center_freq=2412 "
+		      "preamble=4 burst_period=10 ftms_per_burst=5\"\n",
+		      nrf_wifi_util_ftm_start,
+		      2,
+		      20),
+	SHELL_CMD_ARG(neighbor_req,
+		      NULL,
+		      "Send a Neighbor Report request (with LCI/CIVIC sub-elements).\n"
+		      "Pass the parameters as a single quoted string of\n"
+		      "\"<key>=<value>\" tokens (quoting avoids the shell argument\n"
+		      "count limit).\n"
+		      "Parameters:\n"
+		      "    token=<n>                : Dialog token of the request\n"
+		      "    sub_elems=<n>            : Sub-elements bitmap "
+		      "(LCI_REQ=1, CIVIC_REQ=2)\n"
+		      "    lci_mode=<n>             : LCI request mode\n"
+		      "    lci_token=<n>            : LCI request token\n"
+		      "    lci_sub=<n>              : LCI request subject\n"
+		      "    civic_mode=<n>           : CIVIC request mode\n"
+		      "    civic_token=<n>          : CIVIC request token\n"
+		      "    civic_sub=<n>            : CIVIC request subject\n"
+		      "    civic_loc_type=<n>       : CIVIC location type\n"
+		      "    civic_interval_units=<n> : CIVIC interval units\n"
+		      "    civic_interval=<n>       : CIVIC interval value\n"
+		      "Example:\n"
+		      "    wifi_util neighbor_req \"token=1 sub_elems=3 "
+		      "lci_mode=0 lci_token=1 lci_sub=0 civic_mode=0 "
+		      "civic_token=2 civic_sub=0\"\n",
+		      nrf_wifi_util_neighbor_req,
+		      2,
+		      20),
+	SHELL_CMD_ARG(gas_req,
+		      NULL,
+		      "Send a GAS ANQP query request.\n"
+		      "Pass the parameters as a single quoted string of\n"
+		      "\"<key>=<value>\" tokens (quoting avoids the shell argument\n"
+		      "count limit).\n"
+		      "Parameters:\n"
+		      "    mac_addr=<xx:xx:xx:xx:xx:xx> : BSSID of the AP\n"
+		      "    token=<n>      : Dialog token of the GAS query frame\n"
+		      "    channel=<n>    : Channel to send the request on\n"
+		      "    band=<n>       : Band the channel belongs to\n"
+		      "    protocol=<hex> : Advertisement protocol IE (hex, up to "
+		      "4 bytes, e.g. 6c0000)\n"
+		      "    length=<n>     : Length of the query (optional; derived\n"
+		      "                     from query_ids when omitted)\n"
+		      "    query_ids=<hex>: ANQP query IDs as a hex string\n"
+		      "Example:\n"
+		      "    wifi_util gas_req \"mac_addr=00:11:22:33:44:55 token=1 "
+		      "channel=1 band=0 protocol=6c query_ids=010c\"\n",
+		      nrf_wifi_util_gas_req,
+		      2,
+		      20),
 	SHELL_SUBCMD_SET_END);
 
 

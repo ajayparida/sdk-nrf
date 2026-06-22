@@ -947,6 +947,17 @@ static enum nrf_wifi_status umac_event_ctrl_process(struct nrf_wifi_fmac_dev_ctx
 					      umac_hdr->cmd_evnt);
 		}
 		break;
+	case NRF_WIFI_UMAC_EVENT_PEER_MEAS_RESULTS:
+		if (callbk_fns->ftm_peer_result_callbk_fn) {
+			callbk_fns->ftm_peer_result_callbk_fn(vif_ctx->os_vif_ctx,
+							      event_data,
+							      event_len);
+		} else {
+                        nrf_wifi_osal_log_err("%s: No callback registered for event %d\n",
+					      __func__,
+					      umac_hdr->cmd_evnt);
+		}
+		break;
 	case NRF_WIFI_UMAC_EVENT_CMD_STATUS:
 #if WIFI_NRF71_LOG_LEVEL >= NRF_WIFI_LOG_LEVEL_DBG
 		struct nrf_wifi_umac_event_cmd_status *cmd_status =

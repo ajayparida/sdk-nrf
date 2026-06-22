@@ -807,6 +807,66 @@ enum nrf_wifi_status nrf_wifi_fmac_dev_rem_zep(struct nrf_wifi_drv_priv_zep *drv
 	return NRF_WIFI_STATUS_SUCCESS;
 }
 
+void nrf_wifi_ftm_peer_result_callbk_fn(void *vif_ctx,
+                                       struct nrf_wifi_umac_event_peer_meas_results *ftm_event,
+                                       unsigned int event_len)
+{
+	int i = 0;
+	struct nrf_wifi_vif_ctx_zep *vif_ctx_zep = NULL;
+
+	if (!vif_ctx || !ftm_event) {
+		return;
+	}
+
+	vif_ctx_zep = vif_ctx;
+
+	LOG_INF("*********FTM_EVENT_INFO**********");
+	LOG_INF("peer count is %d", ftm_event->num_peers);
+	for (i = 0; i < ftm_event->num_peers; i++) {
+		char mac_str[sizeof("xx:xx:xx:xx:xx:xx")];
+
+		nrf_wifi_sprint_ll_addr_buf(ftm_event->peers[i].mac_addr,
+					    NRF_WIFI_ETH_ADDR_LEN,
+					    mac_str,
+					    sizeof(mac_str));
+		LOG_INF("peer mac_addr=%s", mac_str);
+		if (ftm_event->peers[i].status == NRF_WIFI_FTM_STATUS_SUCCESS) {
+			LOG_INF("-----FTM SUCCESS----");
+			LOG_INF("peer distance=%d.%03d meters",
+				ftm_event->peers[i].ftm.dist_avg / 1000,
+				ftm_event->peers[i].ftm.dist_avg % 1000);
+			LOG_INF("peer rtt=%d.%03d ns",
+				ftm_event->peers[i].ftm.rtt_avg / 1000,
+				ftm_event->peers[i].ftm.rtt_avg % 1000);
+			LOG_INF("peer rtt_variance=%lld",
+				ftm_event->peers[i].ftm.rtt_variance);
+			LOG_INF("peer rtt_spread=%lld",
+				ftm_event->peers[i].ftm.rtt_spread);
+		} else if (ftm_event->peers[i].status == NRF_WIFI_FTM_STATUS_REQ_FAIL) {
+			LOG_INF("-----FTM Request fail--Invalid parameters--");
+		} else if (ftm_event->peers[i].status == NRF_WIFI_FTM_STATUS_NO_RESP_FROM_PEER) {
+			LOG_INF("-----NO response from peer--");
+		} else if (ftm_event->peers[i].status == NRF_WIFI_FTM_STATUS_AP_BUSY) {
+			LOG_INF("-----FTM AP Busy-----");
+		} else if (ftm_event->peers[i].status == NRF_WIFI_FTM_STATUS_FTM_TIMEOUT) {
+			LOG_INF("-----FTM TIMEOUT-----");
+		}
+
+		if (ftm_event->peers[i].ftm.lci_len) {
+			LOG_INF("lci len is %d", ftm_event->peers[i].ftm.lci_len);
+			LOG_HEXDUMP_INF(ftm_event->peers[i].ftm.lci,
+					ftm_event->peers[i].ftm.lci_len,
+					"LCI =");
+		}
+		if (ftm_event->peers[i].ftm.civicloc_len) {
+			LOG_INF("civic len is %d", ftm_event->peers[i].ftm.civicloc_len);
+			LOG_HEXDUMP_INF(ftm_event->peers[i].ftm.civicloc,
+					ftm_event->peers[i].ftm.civicloc_len,
+					"CIVIC =");
+		}
+	}
+}
+
 static int nrf_wifi_drv_main_zep(const struct device *dev)
 {
 #ifndef CONFIG_NRF71_RADIO_TEST
@@ -893,6 +953,7 @@ static int nrf_wifi_drv_main_zep(const struct device *dev)
 	callbk_fns.get_conn_info_callbk_fn = nrf_wifi_supp_event_proc_get_conn_info;
 	callbk_fns.roc_callbk_fn = nrf_wifi_supp_event_remain_on_channel;
 	callbk_fns.roc_cancel_callbk_fn = nrf_wifi_supp_event_roc_cancel_complete;
+	callbk_fns.ftm_peer_result_callbk_fn = &nrf_wifi_ftm_peer_result_callbk_fn;
 #endif /* CONFIG_NRF71_STA_MODE */
 #if defined(CONFIG_NRF71_RAW_DATA_TX) || defined(CONFIG_NRF71_RAW_DATA_RX)
 	callbk_fns.channel_set_done_callbk_fn = nrf_wifi_event_proc_channel_set_done_zep;
